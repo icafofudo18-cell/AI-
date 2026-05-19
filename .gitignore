@@ -1,0 +1,22 @@
+# 敏感配置（含 API Key、手机号）
+config.py
+
+# 登录 Cookie
+toutiao_cookies.json
+
+# 运行日志
+toutiao_auto.log
+
+# 已发布记录（运行时生成）
+published.json
+
+# 发布截图
+screenshots/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 虚拟环境
+venv/
+.venv/
