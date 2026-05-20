@@ -13,6 +13,12 @@ published.json
 # 发布截图
 screenshots/
 
+#生成配图
+images/
+
+#AI生成配图
+covers/
+
 # Python 缓存
 __pycache__/
 *.pyc

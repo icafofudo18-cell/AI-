@@ -20,6 +20,8 @@ from config import HOT_SOURCES, PUBLISH_COUNT, PUBLISH_INTERVAL
 from hot_fetcher import fetch_hot_topics, save_published
 from ai_rewriter import rewrite_article
 from publisher import publish_article, login_only
+from image_generator import generate_cover_image
+from image_searcher import search_and_download_images
 
 
 def setup_logging():
@@ -74,6 +76,37 @@ def run(dry_run: bool = False):
         logger.info(f"改写完成 -> 标题: {article['title']}")
         logger.info(f"正文字数: {len(article['content'])} 字")
         logger.info(f"标签: {article['tags']}")
+
+        # Step 2.5: 生成封面图和文中配图
+        logger.info("Step 2.5: 生成封面图和配图...")
+        cover_path = None
+        inline_paths = []
+        
+        # # 生成封面图(使用 AI) - 暂时注释,硅基流动API返回451错误
+        # if article.get("cover_prompt"):
+        #     logger.info(f"正在生成封面图: {article['cover_prompt']}")
+        #     cover_path = generate_cover_image(article["cover_prompt"])
+        #     if cover_path:
+        #         logger.info(f"封面图已生成: {cover_path}")
+        #     else:
+        #         logger.warning("封面图生成失败，将使用无封面模式")
+        
+        # 搜索文中配图(使用搜索引擎)
+        if article.get("inline_prompts"):
+            from config import INLINE_IMAGES_PER_ARTICLE
+            logger.info(f"正在搜索 {len(article['inline_prompts'])} 张文中配图...")
+            inline_paths = search_and_download_images(
+                article["inline_prompts"], 
+                count=INLINE_IMAGES_PER_ARTICLE
+            )
+            if inline_paths:
+                logger.info(f"文中配图已搜索: {len(inline_paths)} 张")
+            else:
+                logger.warning("文中配图搜索失败")
+        
+        # 将图片路径添加到 article 字典中
+        article["cover_path"] = cover_path
+        article["inline_paths"] = inline_paths
 
         if dry_run:
             print("\n" + "="*60)

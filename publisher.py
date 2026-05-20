@@ -232,44 +232,97 @@ def publish_article(article: dict) -> bool:
             time.sleep(1)
             page.screenshot(path=f"{SCREENSHOTS_DIR}/02_content_filled_{ts}.png")
 
-            # 5. 处理封面图(选择"无封面"单选按钮)
-            logger.info("正在设置封面图为无封面模式...")
-            try:
-                # 直接点击"无封面"单选按钮
-                no_cover_radio = None
-                no_cover_selectors = [
-                    'text="无封面"',  # 点击文字
-                    'label:has-text("无封面")',  # 点击整个label
-                    '[class*="cover-option"]:has-text("无封面")',  # 选项容器
-                ]
-                            
-                for sel in no_cover_selectors:
+            # 5. 处理封面图(上传并选择"单图"模式)
+            cover_path = article.get("cover_path")
+            if cover_path and os.path.exists(cover_path):
+                logger.info(f"正在上传封面图: {cover_path}")
+                try:
+                    uploaded = False
+                                
+                    # 方式1: 直接点击封面图的"+"号区域
                     try:
-                        no_cover_radio = page.locator(sel).first
-                        if no_cover_radio.is_visible(timeout=2000):
-                            no_cover_radio.click(force=True)
-                            time.sleep(0.5)
-                            logger.info(f"已选择无封面: {sel}")
-                            break
-                    except Exception as e:
-                        logger.debug(f"尝试 {sel} 失败: {e}")
-                        continue
-                            
-                if not no_cover_radio:
-                    logger.warning("未找到无封面选项,使用默认设置")
-                else:
-                    # 验证是否选中(检查单选按钮是否被选中)
-                    try:
-                        is_checked = page.locator('text="无封面"').first.is_checked()
-                        if is_checked:
-                            logger.info("无封面已选中")
-                        else:
-                            logger.warning("无封面未成功选中")
-                    except Exception:
-                        pass
+                        # 滚动到封面图区域
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        time.sleep(1)
                                     
-            except Exception as e:
-                logger.warning(f"封面图设置失败,继续发布: {e}")
+                        # 找"+"号按钮
+                        cover_click = page.locator('.cover-uploader, [class*="cover"] .plus, text="+"').first
+                        if cover_click.is_visible(timeout=3000):
+                            cover_click.click()
+                            time.sleep(1)
+                            logger.info("已点击封面图+号")
+                                        
+                            # 等待文件选择框
+                            upload_input = page.locator('input[type="file"]').first
+                            upload_input.wait_for(timeout=5000)
+                            upload_input.set_input_files(cover_path)
+                            time.sleep(3)  # 增加等待时间让图片加载
+                            logger.info("封面图上传成功(方式1)")
+                            uploaded = True
+                    except Exception as e:
+                        logger.debug(f"方式1失败: {e}")
+                                
+                    # 方式2: 通过发文设置面板上传
+                    if not uploaded:
+                        try:
+                            settings_btn = page.locator('text="发文设置"').first
+                            if settings_btn.is_visible(timeout=3000):
+                                settings_btn.click()
+                                time.sleep(1)
+                                logger.info("已点击发文设置按钮")
+                                        
+                            # 在面板中找上传按钮
+                            upload_btn = page.locator('text="上传", text="选择图片"').first
+                            if upload_btn.is_visible(timeout=3000):
+                                upload_btn.click()
+                                time.sleep(1)
+                                            
+                                upload_input = page.locator('input[type="file"]').first
+                                upload_input.wait_for(timeout=5000)
+                                upload_input.set_input_files(cover_path)
+                                time.sleep(3)
+                                logger.info("封面图上传成功(方式2)")
+                                uploaded = True
+                                            
+                                # 关闭面板
+                                page.keyboard.press("Escape")
+                                time.sleep(1)
+                        except Exception as e:
+                            logger.debug(f"方式2失败: {e}")
+                                
+                    if uploaded:
+                        # 选择"单图"模式
+                        single_image_radio = page.locator('text="单图"').first
+                        if single_image_radio.is_visible(timeout=2000):
+                            single_image_radio.click(force=True)
+                            time.sleep(0.5)
+                            logger.info("已选择单图模式")
+                                    
+                        # 等待图片加载完成
+                        time.sleep(3)
+                                    
+                        # 截图确认
+                        page.screenshot(path=f"{SCREENSHOTS_DIR}/03_after_cover_{ts}.png")
+                        logger.info("封面图上传完成")
+                    else:
+                        logger.warning("所有封面图上传方式都失败,将使用无封面模式")
+                        page.screenshot(path=f"{SCREENSHOTS_DIR}/cover_upload_failed_{ts}.png")
+                        # 关闭可能打开的面板
+                        page.keyboard.press("Escape")
+                        time.sleep(0.5)
+                except Exception as e:
+                    logger.warning(f"封面图上传失败，将使用无封面模式: {e}")
+            else:
+                logger.info("没有封面图，使用无封面模式")
+                # 选择"无封面"模式
+                try:
+                    no_cover_radio = page.locator('text="无封面"').first
+                    if no_cover_radio.is_visible(timeout=2000):
+                        no_cover_radio.click(force=True)
+                        time.sleep(0.5)
+                        logger.info("已选择无封面模式")
+                except Exception as e:
+                    logger.warning(f"选择无封面失败: {e}")
                         
             # 截图记录封面设置后的状态
             page.screenshot(path=f"{SCREENSHOTS_DIR}/03_cover_set_{ts}.png")
