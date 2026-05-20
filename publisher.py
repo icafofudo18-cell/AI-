@@ -120,108 +120,252 @@ def publish_article(article: dict) -> bool:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             page.screenshot(path=f"{SCREENSHOTS_DIR}/01_publish_page_{ts}.png")
 
+            # 2.5 关闭右侧"头条创作助手"浮层（它的遮罩会拦截点击）
+            try:
+                # 方式1：点击关闭按钮（面板右上角的收起图标）
+                close_btn = page.locator('.ai-assistant-drawer .byte-drawer-close, .ai-assistant-drawer [class*="close"]').first
+                if close_btn.is_visible(timeout=2000):
+                    close_btn.click(force=True)
+                    time.sleep(0.5)
+                    logger.info("已关闭 AI 创作助手面板")
+            except Exception:
+                pass
+            
+            # 如果关闭按钮没找到，尝试点击遮罩层外部区域来关闭
+            try:
+                drawer_mask = page.locator('.byte-drawer-mask').first
+                if drawer_mask.is_visible(timeout=1000):
+                    drawer_mask.click(force=True)
+                    time.sleep(0.5)
+                    logger.info("通过点击遮罩关闭浮层")
+            except Exception:
+                pass
+
             # 3. 填写文章标题
             logger.info("正在填写标题...")
-            title_selectors = [
-                'input[placeholder*="标题"]',
-                'input[placeholder*="请输入标题"]',
-                '.title-input input',
-                'input.title',
-            ]
             title_input = None
-            for sel in title_selectors:
+            try:
+                # 方式1：通过 placeholder 文本定位（支持 contenteditable 和 textarea）
+                title_input = page.get_by_placeholder("请输入文章标题").first
+                title_input.wait_for(timeout=5000)
+            except Exception:
+                pass
+
+            if not title_input or not title_input.is_visible():
                 try:
-                    title_input = page.wait_for_selector(sel, timeout=5000)
-                    if title_input:
-                        break
-                except PlaywrightTimeout:
-                    continue
-            
+                    # 方式2：通过 class/属性选择器备用
+                    title_selectors = [
+                        'textarea[placeholder*="标题"]',
+                        '[data-placeholder*="标题"]',
+                        '.article-title [contenteditable="true"]',
+                        '.title-wrap [contenteditable="true"]',
+                    ]
+                    for sel in title_selectors:
+                        try:
+                            title_input = page.wait_for_selector(sel, timeout=3000)
+                            if title_input and title_input.is_visible():
+                                break
+                        except PlaywrightTimeout:
+                            continue
+                except Exception:
+                    pass
+
             if not title_input:
                 logger.error("找不到标题输入框")
                 page.screenshot(path=f"{SCREENSHOTS_DIR}/error_no_title_{ts}.png")
                 return False
-            
-            title_input.click()
-            title_input.fill("")
-            title_input.type(article["title"], delay=50)
+
+            title_input.click(force=True)
+            time.sleep(0.3)
+            # 清空现有内容
+            page.keyboard.press("Control+A")
+            page.keyboard.press("Backspace")
+            # 输入标题
+            page.keyboard.type(article["title"], delay=50)
             time.sleep(0.5)
 
             # 4. 填写正文内容
             logger.info("正在填写正文内容...")
-            editor_selectors = [
-                '.editor-kit-container [contenteditable="true"]',
-                '[contenteditable="true"].public-DraftEditor-content',
-                '.notranslate[contenteditable="true"]',
-                '[contenteditable="true"]',
-            ]
-            editor = None
-            for sel in editor_selectors:
+            
+            # 策略1：从标题输入框直接 Tab 跳转到正文编辑区
+            try:
+                page.keyboard.press("Tab")
+                time.sleep(0.5)
+                logger.info("通过 Tab 键跳转到正文区域")
+            except Exception as e:
+                logger.warning(f"Tab 跳转失败: {e}")
+            
+            # 策略2：如果 Tab 没效果，直接定位 contenteditable 元素
+            # 先尝试点击正文区域确保焦点正确
+            try:
+                # 排除 textarea（标题），找 contenteditable 的 div
+                editor_candidates = page.locator('[contenteditable="true"]')
+                count = editor_candidates.count()
+                logger.info(f"找到 {count} 个 contenteditable 元素")
+                
+                if count > 0:
+                    # 取第一个 contenteditable div（标题是 textarea，不是 contenteditable）
+                    editor = editor_candidates.first
+                    editor.click(force=True)
+                    time.sleep(0.3)
+                    logger.info("已点击正文编辑区域")
+            except Exception as e:
+                logger.warning(f"点击编辑器失败: {e}")
+                # 策略3：通过文本定位
                 try:
-                    editor = page.wait_for_selector(sel, timeout=5000)
-                    if editor:
-                        break
-                except PlaywrightTimeout:
-                    continue
-            
-            if not editor:
-                logger.error("找不到正文编辑器")
-                page.screenshot(path=f"{SCREENSHOTS_DIR}/error_no_editor_{ts}.png")
-                return False
-            
-            editor.click()
-            time.sleep(0.5)
-            
+                    placeholder_el = page.get_by_text("请输入正文").first
+                    placeholder_el.click(force=True)
+                    time.sleep(0.3)
+                    logger.info("通过文本定位点击正文区域")
+                except Exception as e2:
+                    logger.error(f"所有正文定位策略均失败: {e2}")
+                    page.screenshot(path=f"{SCREENSHOTS_DIR}/error_no_editor_{ts}.png")
+                    return False
+
             # 逐段输入正文（处理换行）
             paragraphs = article["content"].split("\n")
             for para in paragraphs:
                 if para.strip():
-                    page.keyboard.type(para.strip(), delay=20)
+                    page.keyboard.type(para.strip(), delay=10)
                 page.keyboard.press("Enter")
-            
+
             time.sleep(1)
             page.screenshot(path=f"{SCREENSHOTS_DIR}/02_content_filled_{ts}.png")
 
-            # 5. 处理标签（如果有标签输入区域）
+            # 5. 处理封面图(选择"无封面"单选按钮)
+            logger.info("正在设置封面图为无封面模式...")
+            try:
+                # 直接点击"无封面"单选按钮
+                no_cover_radio = None
+                no_cover_selectors = [
+                    'text="无封面"',  # 点击文字
+                    'label:has-text("无封面")',  # 点击整个label
+                    '[class*="cover-option"]:has-text("无封面")',  # 选项容器
+                ]
+                            
+                for sel in no_cover_selectors:
+                    try:
+                        no_cover_radio = page.locator(sel).first
+                        if no_cover_radio.is_visible(timeout=2000):
+                            no_cover_radio.click(force=True)
+                            time.sleep(0.5)
+                            logger.info(f"已选择无封面: {sel}")
+                            break
+                    except Exception as e:
+                        logger.debug(f"尝试 {sel} 失败: {e}")
+                        continue
+                            
+                if not no_cover_radio:
+                    logger.warning("未找到无封面选项,使用默认设置")
+                else:
+                    # 验证是否选中(检查单选按钮是否被选中)
+                    try:
+                        is_checked = page.locator('text="无封面"').first.is_checked()
+                        if is_checked:
+                            logger.info("无封面已选中")
+                        else:
+                            logger.warning("无封面未成功选中")
+                    except Exception:
+                        pass
+                                    
+            except Exception as e:
+                logger.warning(f"封面图设置失败,继续发布: {e}")
+                        
+            # 截图记录封面设置后的状态
+            page.screenshot(path=f"{SCREENSHOTS_DIR}/03_cover_set_{ts}.png")
+
+            # 6. 处理标签（如果有标签输入区域）
             if article.get("tags"):
                 _fill_tags(page, article["tags"], ts)
 
-            # 6. 点击发布按钮
-            logger.info("正在点击发布按钮...")
-            publish_btn_selectors = [
-                'button:has-text("发布文章")',
-                'button:has-text("发布")',
-                '.publish-btn',
-                'button[class*="publish"]',
-            ]
+            # 7. 点击"预览并发布"按钮
+            logger.info("正在点击预览并发布按钮...")
             publish_btn = None
-            for sel in publish_btn_selectors:
+            publish_btn_strategies = [
+                lambda: page.locator('button:has-text("预览并发布")').last,  # 优先匹配"预览并发布"
+                lambda: page.get_by_role("button", name="预览并发布"),
+                lambda: page.locator('button:has-text("发布")').last,  # 备用:只匹配"发布"
+                lambda: page.get_by_role("button", name="发布"),
+                lambda: page.locator('.publish-btn, [class*="publish"]').first,
+            ]
+            for strategy in publish_btn_strategies:
                 try:
-                    publish_btn = page.wait_for_selector(sel, timeout=5000)
-                    if publish_btn and publish_btn.is_visible():
+                    btn = strategy()
+                    if btn.is_visible(timeout=3000):
+                        publish_btn = btn
+                        logger.info(f"找到发布按钮: {btn.text_content()}")
                         break
-                except PlaywrightTimeout:
+                except Exception:
                     continue
-            
+                        
             if not publish_btn:
                 logger.error("找不到发布按钮")
                 page.screenshot(path=f"{SCREENSHOTS_DIR}/error_no_publish_btn_{ts}.png")
                 return False
-            
-            page.screenshot(path=f"{SCREENSHOTS_DIR}/03_before_publish_{ts}.png")
+                        
+            page.screenshot(path=f"{SCREENSHOTS_DIR}/04_before_publish_{ts}.png")
             publish_btn.click()
             time.sleep(3)
+                        
+            # 8. 处理预览和确认发布
+            logger.info("等待预览界面出现...")
             
-            # 7. 处理可能出现的确认弹窗
+            # 策略1:等待弹窗出现
+            preview_found = False
             try:
-                confirm_btn = page.wait_for_selector('button:has-text("确认发布")', timeout=3000)
-                if confirm_btn:
-                    confirm_btn.click()
-                    time.sleep(2)
+                preview_dialog = page.wait_for_selector('.byte-modal, .modal, [class*="preview"], [class*="dialog"]', timeout=5000)
+                if preview_dialog:
+                    logger.info("预览弹窗已出现")
+                    preview_found = True
+                    time.sleep(1)
+                    page.screenshot(path=f"{SCREENSHOTS_DIR}/05_preview_dialog_{ts}.png")
             except PlaywrightTimeout:
-                pass  # 没有确认弹窗，继续
+                logger.info("未出现预览弹窗,检查是否页面跳转...")
+            
+            # 策略2:如果弹窗没出现,可能是页面内嵌预览,滚动查找确认按钮
+            if not preview_found:
+                logger.info("滚动页面查找确认按钮...")
+                try:
+                    # 滚动到底部
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    time.sleep(1)
+                    page.screenshot(path=f"{SCREENSHOTS_DIR}/05_preview_scrolled_{ts}.png")
+                except Exception as e:
+                    logger.warning(f"滚动失败: {e}")
+            
+            # 查找确认发布按钮(支持多种文本)
+            confirm_btn = None
+            confirm_strategies = [
+                lambda: page.locator('button:has-text("确认发布")').first,
+                lambda: page.get_by_role("button", name="确认发布"),
+                lambda: page.locator('button:has-text("确认")').first,
+                lambda: page.get_by_role("button", name="确认"),
+                lambda: page.locator('.byte-modal button:has-text("发布")').first,
+                lambda: page.locator('.modal button:has-text("发布")').first,
+                lambda: page.locator('button:has-text("确定")').first,  # 有些是"确定"
+                lambda: page.get_by_role("button", name="确定"),
+            ]
+            
+            for strategy in confirm_strategies:
+                try:
+                    btn = strategy()
+                    if btn.is_visible(timeout=2000):
+                        confirm_btn = btn
+                        logger.info(f"找到确认按钮: {btn.text_content()}")
+                        break
+                except Exception:
+                    continue
+            
+            if confirm_btn:
+                logger.info("点击确认发布按钮...")
+                confirm_btn.click()
+                time.sleep(3)
+            else:
+                logger.warning("未找到确认按钮,尝试直接完成发布")
+                page.screenshot(path=f"{SCREENSHOTS_DIR}/05_no_confirm_btn_{ts}.png")
+                # 不返回False,继续验证发布结果
 
-            # 8. 验证发布结果
+            # 9. 验证发布结果
             time.sleep(3)
             page.screenshot(path=f"{SCREENSHOTS_DIR}/04_after_publish_{ts}.png")
             

@@ -22,8 +22,8 @@ REWRITE_PROMPT = """你是一名专业的今日头条自媒体内容创作者，
 【来源平台】{source}
 
 【创作要求】
-1. 标题：重新创作一个吸引点击的标题，保留核心关键词，字数20~30字，可以使用数字、疑问句或对比手法
-2. 正文：800~1200字，分段清晰，包含：
+1. 标题：重新创作一个吸引点击的标题,保留核心关键词,字数控制在20~28字之间(绝对不能超过30字),可以使用数字、疑问句或对比手法
+2. 正文：800~1200字,分段清晰,包含:
    - 开篇：用1~2句话抓住读者注意力
    - 事件背景：介绍事件来龙去脉
    - 深度分析：多角度解读事件意义或影响
@@ -81,6 +81,12 @@ def rewrite_article(topic: dict) -> dict | None:
         # 确保 tags 是列表
         if not isinstance(article.get("tags"), list):
             article["tags"] = []
+        
+        # 验证标题长度（今日头条限制30字）
+        title = article["title"]
+        if len(title) > 30:
+            logger.warning(f"标题超长({len(title)}字),自动截断: {title}")
+            article["title"] = title[:28] + "..."
         
         logger.info(f"改写成功: {article['title'][:40]}")
         return article
